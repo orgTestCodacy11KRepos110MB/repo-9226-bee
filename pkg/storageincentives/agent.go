@@ -54,6 +54,9 @@ type Agent struct {
 	overlay        swarm.Address
 	quit           chan struct{}
 	wg             sync.WaitGroup
+	latestPriceBlock  uint64
+	latestPrice       *big.Int
+	latestTotalPayout *big.Int
 }
 
 func New(
@@ -174,6 +177,12 @@ func (a *Agent) start(blockTime time.Duration, blocksPerRound, blocksPerPhase ui
 				a.logger.Debug("revealed the sample with the obfuscation key")
 			}
 		}
+
+		cs := a.reserve.GetChainState()
+		a.latestPriceBlock = cs.Block
+		a.latestPrice = new(big.Int).Set(cs.TotalAmount)
+		a.latestTotalPayout = new(big.Int).Set(cs.CurrentPrice)
+
 	})
 
 	phaseEvents.On(claim, func(ctx context.Context, _ PhaseType) {
@@ -338,13 +347,24 @@ func (a *Agent) play(ctx context.Context) (uint8, []byte, error) {
 	}
 
 	t := time.Now()
+	a.metrics.BackendCalls.Inc()
+	block, err := a.backend.BlockNumber(ctx)
+	if err != nil {
+		a.metrics.BackendErrors.Inc()
+		return 0, nil, err
+	}
 
 	timeLimiter, err := a.getPreviousRoundTime(ctx)
 	if err != nil {
 		return 0, nil, err
 	}
 
-	sample, err := a.sampler.ReserveSample(ctx, salt, storageRadius, uint64(timeLimiter))
+	nextRoundNumber := (block / a.blocksPerRound) + 1
+	nextRoundBeginningBlock := nextRoundNumber * a.blocksPerRound
+	difference := nextRoundBeginningBlock - a.latestPriceBlock
+	minimumBalance := new(big.Int).Add(a.latestTotalPayout, new(big.Int).Mul(a.latestPrice, big.NewInt(int64(difference))))
+
+	sample, err := a.sampler.ReserveSample(ctx, salt, storageRadius, uint64(timeLimiter), minimumBalance)
 	if err != nil {
 		return 0, nil, err
 	}

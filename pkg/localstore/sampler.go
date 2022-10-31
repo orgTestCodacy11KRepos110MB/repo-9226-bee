@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"math/big"
 	"time"
 
 	"github.com/ethersphere/bee/pkg/bmtpool"
@@ -78,6 +79,7 @@ func (db *DB) ReserveSample(
 	anchor []byte,
 	storageRadius uint8,
 	consensusTime uint64, // nanoseconds
+	minimumBalance *big.Int,
 ) (storage.Sample, error) {
 
 	g, ctx := errgroup.WithContext(ctx)
@@ -225,7 +227,16 @@ func (db *DB) ReserveSample(
 				if !validChunkFn(chunk) {
 					logger.Debug("data invalid for chunk address", "chunk_address", chunk.Address())
 				} else {
-					insert(item.transformedAddress)
+					batch, err := db.batchStore.Get(item.chunkItem.BatchID)
+					if err != nil {
+						logger.Info("excluded stamp with batch not found", chunk.Address())
+
+					}
+					if batch.Value.Cmp(minimumBalance) > 0 {
+						insert(item.transformedAddress)
+					} else {
+						logger.Info("excluded stamp with low remaining balance", chunk.Address())
+					}
 				}
 			} else {
 				logger.Debug("invalid stamp for chunk", "chunk_address", chunk.Address(), "error", err)
