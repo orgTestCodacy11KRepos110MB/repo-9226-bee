@@ -11,8 +11,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"sync"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/ethersphere/bee/pkg/bmtpool"
@@ -30,6 +30,7 @@ const sampleSize = 8
 
 var errDbClosed = errors.New("database closed")
 var errSamplerStopped = errors.New("sampler stopped due to ongoing evictions")
+var errSamplerStoppedI = errors.New("sampler stopped due to batchStore iteration error")
 
 type sampleStat struct {
 	TotalIterated      atomic.Int64
@@ -88,6 +89,12 @@ func (db *DB) ReserveSample(
 	logger := db.logger.WithName("sampler").V(1).Register()
 
 	t := time.Now()
+	excludedBatchIDs, err := db.batchStore.GetBatchIDsExpiringUntil(minimumBalance)
+	if err != nil {
+		logger.Error(err, "error getting minimum balance based excluded batchIDs")
+		return storage.Sample{}, fmt.Errorf("sampler: failed creating sample: %w", errSamplerStoppedI)
+	}
+
 	// signal start of sampling to see if we get any evictions during the sampler
 	// run
 	db.startSampling()
@@ -210,6 +217,11 @@ func (db *DB) ReserveSample(
 
 			chunk := swarm.NewChunk(swarm.NewAddress(item.chunkItem.Address), item.chunkItem.Data)
 
+			if _, found := excludedBatchIDs[string(item.chunkItem.BatchID)]; found {
+				logger.Debug("excluded chunk with batch balance below minimum", "chunk_address", chunk.Address())
+				continue
+			}
+
 			stamp := postage.NewStamp(
 				item.chunkItem.BatchID,
 				item.chunkItem.Index,
@@ -227,16 +239,7 @@ func (db *DB) ReserveSample(
 				if !validChunkFn(chunk) {
 					logger.Debug("data invalid for chunk address", "chunk_address", chunk.Address())
 				} else {
-					batch, err := db.batchStore.Get(item.chunkItem.BatchID)
-					if err != nil {
-						logger.Info("excluded stamp with batch not found", chunk.Address())
-
-					}
-					if batch.Value.Cmp(minimumBalance) > 0 {
-						insert(item.transformedAddress)
-					} else {
-						logger.Info("excluded stamp with low remaining balance", chunk.Address())
-					}
+					insert(item.transformedAddress)
 				}
 			} else {
 				logger.Debug("invalid stamp for chunk", "chunk_address", chunk.Address(), "error", err)

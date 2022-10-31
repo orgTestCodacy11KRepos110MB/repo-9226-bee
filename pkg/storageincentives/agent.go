@@ -42,18 +42,18 @@ type Monitor interface {
 }
 
 type Agent struct {
-	logger         log.Logger
-	metrics        metrics
-	backend        ChainBackend
-	blocksPerRound uint64
-	monitor        Monitor
-	contract       redistribution.Contract
-	batchExpirer   postagecontract.PostageBatchExpirer
-	radius         postage.RadiusChecker
-	sampler        storage.Sampler
-	overlay        swarm.Address
-	quit           chan struct{}
-	wg             sync.WaitGroup
+	logger            log.Logger
+	metrics           metrics
+	backend           ChainBackend
+	blocksPerRound    uint64
+	monitor           Monitor
+	contract          redistribution.Contract
+	batchExpirer      postagecontract.PostageBatchExpirer
+	radius            postage.RadiusChecker
+	sampler           storage.Sampler
+	overlay           swarm.Address
+	quit              chan struct{}
+	wg                sync.WaitGroup
 	latestPriceBlock  uint64
 	latestPrice       *big.Int
 	latestTotalPayout *big.Int
@@ -71,17 +71,19 @@ func New(
 	blockTime time.Duration, blocksPerRound, blocksPerPhase uint64) *Agent {
 
 	s := &Agent{
-		overlay:        overlay,
-		metrics:        newMetrics(),
-		backend:        backend,
-		logger:         logger.WithName(loggerName).Register(),
-		contract:       contract,
-		batchExpirer:   batchExpirer,
-		radius:         radius,
-		monitor:        monitor,
-		blocksPerRound: blocksPerRound,
-		sampler:        sampler,
-		quit:           make(chan struct{}),
+		overlay:           overlay,
+		metrics:           newMetrics(),
+		backend:           backend,
+		logger:            logger.WithName(loggerName).Register(),
+		contract:          contract,
+		batchExpirer:      batchExpirer,
+		radius:            radius,
+		monitor:           monitor,
+		blocksPerRound:    blocksPerRound,
+		sampler:           sampler,
+		quit:              make(chan struct{}),
+		latestPrice:       big.NewInt(0),
+		latestTotalPayout: big.NewInt(0),
 	}
 
 	s.wg.Add(1)
@@ -178,7 +180,7 @@ func (a *Agent) start(blockTime time.Duration, blocksPerRound, blocksPerPhase ui
 			}
 		}
 
-		cs := a.reserve.GetChainState()
+		cs := a.radius.GetChainState()
 		a.latestPriceBlock = cs.Block
 		a.latestPrice = new(big.Int).Set(cs.TotalAmount)
 		a.latestTotalPayout = new(big.Int).Set(cs.CurrentPrice)
