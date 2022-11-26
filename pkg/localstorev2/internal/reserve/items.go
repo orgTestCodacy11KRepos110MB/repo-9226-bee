@@ -1,7 +1,6 @@
 package reserve
 
 import (
-	"encoding/binary"
 	"fmt"
 
 	"github.com/ethersphere/bee/pkg/swarm"
@@ -10,18 +9,19 @@ import (
 const batchRadiusItemSize = 1 + swarm.HashSize + 8
 
 type batchRadiusItem struct {
-	po        uint8
-	batchID   []byte
-	address   swarm.Address
-	timestamp uint64
+	batchID []byte
+
+	PO        uint8
+	Address   swarm.Address
+	Timestamp []byte
 }
 
 func (b *batchRadiusItem) Namespace() string {
-	return fmt.Sprintf("batchRadius/%s", b.batchID)
+	return "batchRadius"
 }
 
 func (b *batchRadiusItem) ID() string {
-	return fmt.Sprintf("%d/%s", b.po, b.address.ByteString())
+	return fmt.Sprintf("%s/%d/%s", b.batchID, b.PO, b.Address.ByteString())
 }
 
 func (b *batchRadiusItem) Marshal() ([]byte, error) {
@@ -30,13 +30,13 @@ func (b *batchRadiusItem) Marshal() ([]byte, error) {
 
 	i := 0
 
-	buf[i] = b.po
+	buf[i] = b.PO
 	i += 1
 
-	copy(buf[i:], b.address.Bytes())
+	copy(buf[i:], b.Address.Bytes())
 	i += swarm.HashSize
 
-	binary.BigEndian.PutUint64(buf[i:], b.timestamp)
+	copy(buf[i:], b.Timestamp)
 
 	return buf, nil
 }
@@ -44,20 +44,20 @@ func (b *batchRadiusItem) Marshal() ([]byte, error) {
 func (b *batchRadiusItem) Unmarshal(buf []byte) error {
 
 	i := 0
-	b.po = buf[i]
+	b.PO = buf[i]
 	i += 1
 
-	b.address = swarm.NewAddress(buf[i : i+swarm.HashSize])
+	b.Address = swarm.NewAddress(buf[i : i+swarm.HashSize])
 	i += swarm.HashSize
 
-	b.timestamp = binary.BigEndian.Uint64(buf[i:])
+	copy(buf[i:], b.Timestamp)
 	return nil
 }
 
 type chunkProximityItem struct {
 	po        uint8
 	address   swarm.Address
-	timestamp uint64
+	timestamp []byte
 }
 
 func (c *chunkProximityItem) Namespace() string {
