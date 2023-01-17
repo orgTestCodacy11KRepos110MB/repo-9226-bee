@@ -67,7 +67,7 @@ func (r *reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 		return nil
 	}
 
-	_, err = r.chunkStore.Put(ctx, chunk)
+	err = r.chunkStore.Put(ctx, chunk)
 	if err != nil {
 		return nil
 	}
