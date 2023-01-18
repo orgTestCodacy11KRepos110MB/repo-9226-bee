@@ -127,6 +127,9 @@ func (s *store) cleanup() error {
 
 func (s *store) GetBatchIDsExpiringUntil(until *big.Int) (map[string]bool, error) {
 
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
 	exclude := make(map[string]bool)
 
 	err := s.store.Iterate(valueKeyPrefix, func(key, value []byte) (stop bool, err error) {
