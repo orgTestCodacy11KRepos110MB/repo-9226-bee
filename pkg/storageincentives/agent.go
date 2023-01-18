@@ -182,8 +182,12 @@ func (a *Agent) start(blockTime time.Duration, blocksPerRound, blocksPerPhase ui
 
 		cs := a.radius.GetChainState()
 		a.latestPriceBlock = cs.Block
-		a.latestPrice = new(big.Int).Set(cs.TotalAmount)
-		a.latestTotalPayout = new(big.Int).Set(cs.CurrentPrice)
+		if cs.CurrentPrice != nil {
+			a.latestPrice = new(big.Int).Set(cs.CurrentPrice)
+		}
+		if cs.TotalAmount != nil {
+			a.latestTotalPayout = new(big.Int).Set(cs.TotalAmount)
+		}
 
 	})
 
