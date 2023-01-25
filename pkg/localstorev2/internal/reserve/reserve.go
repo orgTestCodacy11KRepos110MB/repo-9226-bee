@@ -2,6 +2,7 @@ package reserve
 
 import (
 	"context"
+	"errors"
 
 	storage "github.com/ethersphere/bee/pkg/storagev2"
 	"github.com/ethersphere/bee/pkg/swarm"
@@ -14,6 +15,12 @@ type reserve struct {
 	count      int
 	capacity   int
 }
+
+/*
+	pull by po - binID
+	evict by po - batch
+	sample by po
+*/
 
 func New(store storage.Store, baseAddr swarm.Address, chunkStore storage.ChunkStore, capacity int) (*reserve, error) {
 
@@ -43,11 +50,18 @@ func (r *reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 		return nil
 	}
 
+	po := r.po(chunk.Address())
+	binID, err := r.incBinID(po)
+	if err != nil {
+		return nil
+	}
+
 	err = r.store.Put(&batchRadiusItem{
-		PO:        r.po(chunk.Address()),
+		PO:        po,
 		Address:   chunk.Address(),
 		batchID:   chunk.Stamp().BatchID(),
 		Timestamp: chunk.Stamp().Timestamp(),
+		BinID:     binID,
 	})
 	if err != nil {
 		return nil
@@ -59,7 +73,8 @@ func (r *reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 	}()
 
 	err = r.store.Put(&chunkProximityItem{
-		po:        r.po(chunk.Address()),
+		po:        po,
+		binID:     binID,
 		address:   chunk.Address(),
 		timestamp: chunk.Stamp().Timestamp(),
 	})
@@ -67,16 +82,28 @@ func (r *reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 		return nil
 	}
 
-	err = r.chunkStore.Put(ctx, chunk)
-	if err != nil {
-		return nil
-	}
-
-	return nil
+	return r.chunkStore.Put(ctx, chunk)
 }
 
 func (r *reserve) po(addr swarm.Address) uint8 {
 	return swarm.Proximity(r.baseAddr.Bytes(), addr.Bytes())
+}
+
+func (r *reserve) incBinID(po uint8) (uint64, error) {
+
+	bin := &binItem{po: po}
+	err := r.store.Get(bin)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return 0, r.store.Put(bin)
+		}
+
+		return 0, err
+	}
+
+	bin.binID += 1
+
+	return bin.binID, r.store.Put(bin)
 }
 
 func (r *reserve) limitSize() {
@@ -94,8 +121,12 @@ func (r *reserve) UnreserveBatch(ctx context.Context, batchID []byte, po uint8) 
 
 	for i := uint8(0); i < po; i++ {
 		err := r.store.Iterate(storage.Query{
-			Factory: func() storage.Item { return &batchRadiusItem{} },
-			// TODO: prefix batchID/po
+			Factory: func() storage.Item {
+				return &batchRadiusItem{
+					batchID: batchID,
+					PO:      po,
+				}
+			},
 		}, func(res storage.Result) (bool, error) {
 			batchRadius := res.Entry.(*batchRadiusItem)
 			batchRadius.batchID = batchID
@@ -111,6 +142,7 @@ func (r *reserve) UnreserveBatch(ctx context.Context, batchID []byte, po uint8) 
 				po:        batchRadius.PO,
 				address:   batchRadius.Address,
 				timestamp: batchRadius.Timestamp,
+				binID:     batchRadius.BinID,
 			})
 			if err != nil {
 				return false, err

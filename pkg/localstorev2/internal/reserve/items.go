@@ -9,19 +9,19 @@ import (
 const batchRadiusItemSize = 1 + swarm.HashSize + 8
 
 type batchRadiusItem struct {
-	batchID []byte
-
+	batchID   []byte
 	PO        uint8
 	Address   swarm.Address
 	Timestamp []byte
+	BinID     uint64
 }
 
 func (b *batchRadiusItem) Namespace() string {
-	return "batchRadius"
+	return fmt.Sprintf("batchRadius/%d/%s", b.PO, b.batchID)
 }
 
 func (b *batchRadiusItem) ID() string {
-	return fmt.Sprintf("%s/%d/%s", b.batchID, b.PO, b.Address.ByteString())
+	return b.Address.ByteString()
 }
 
 func (b *batchRadiusItem) Marshal() ([]byte, error) {
@@ -56,22 +56,51 @@ func (b *batchRadiusItem) Unmarshal(buf []byte) error {
 
 type chunkProximityItem struct {
 	po        uint8
+	binID     uint64
 	address   swarm.Address
 	timestamp []byte
 }
 
 func (c *chunkProximityItem) Namespace() string {
-	return "chunkProximity"
+	return fmt.Sprintf("chunkProximity/%d", c.po)
 }
 
 func (c *chunkProximityItem) ID() string {
-	return fmt.Sprintf("%d/%d/%s", c.po, c.timestamp, c.address.ByteString())
+	return fmt.Sprintf("%d", c.binID)
 }
 
 func (b *chunkProximityItem) Marshal() ([]byte, error) {
+
+	// marshall address
+	// marshall timestamp
+
 	return nil, nil
 }
 
 func (b *chunkProximityItem) Unmarshal(buf []byte) error {
+	return nil
+}
+
+type binItem struct {
+	po    uint8
+	binID uint64
+}
+
+func (b *binItem) Namespace() string {
+	return "binIndex"
+}
+
+func (c *binItem) ID() string {
+	return fmt.Sprintf("%d", c.po)
+}
+
+func (b *binItem) Marshal() ([]byte, error) {
+
+	// marshall index
+
+	return nil, nil
+}
+
+func (b *binItem) Unmarshal(buf []byte) error {
 	return nil
 }
