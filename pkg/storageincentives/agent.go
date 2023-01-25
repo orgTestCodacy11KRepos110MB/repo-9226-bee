@@ -142,20 +142,20 @@ func (a *Agent) start(blockTime time.Duration, blocksPerRound, blocksPerPhase ui
 	}
 
 	// when the sample finishes, if we are in the commit phase, run commit
-	phaseEvents.On(sampleEnd, func(ctx context.Context, previous PhaseType) {
+	phaseEvents.On(sampleEnd, func(ctx context.Context, block uint64, previous PhaseType) {
 		if previous == commit {
 			commitF(ctx)
 		}
 	})
 
 	// when we enter the commit phase, if the sample is already finished, run commit
-	phaseEvents.On(commit, func(ctx context.Context, previous PhaseType) {
+	phaseEvents.On(commit, func(ctx context.Context, block uint64, previous PhaseType) {
 		if previous == sampleEnd {
 			commitF(ctx)
 		}
 	})
 
-	phaseEvents.On(reveal, func(ctx context.Context, _ PhaseType) {
+	phaseEvents.On(reveal, func(ctx context.Context, block uint64, _ PhaseType) {
 
 		// cancel previous executions of the commit and sample phases
 		phaseEvents.Cancel(commit, sample, sampleEnd)
@@ -191,7 +191,7 @@ func (a *Agent) start(blockTime time.Duration, blocksPerRound, blocksPerPhase ui
 
 	})
 
-	phaseEvents.On(claim, func(ctx context.Context, _ PhaseType) {
+	phaseEvents.On(claim, func(ctx context.Context, block uint64, _ PhaseType) {
 
 		phaseEvents.Cancel(reveal)
 
@@ -208,13 +208,13 @@ func (a *Agent) start(blockTime time.Duration, blocksPerRound, blocksPerPhase ui
 		}
 	})
 
-	phaseEvents.On(sample, func(ctx context.Context, _ PhaseType) {
+	phaseEvents.On(sample, func(ctx context.Context, block uint64, _ PhaseType) {
 
 		mtx.Lock()
 		round := round
 		mtx.Unlock()
 
-		sr, smpl, err := a.play(ctx)
+		sr, smpl, err := a.play(ctx, block)
 		if err != nil {
 			a.logger.Error(err, "make sample")
 		} else if smpl != nil {
@@ -226,7 +226,7 @@ func (a *Agent) start(blockTime time.Duration, blocksPerRound, blocksPerPhase ui
 			mtx.Unlock()
 		}
 
-		phaseEvents.Publish(sampleEnd)
+		phaseEvents.Publish(sampleEnd, block)
 	})
 
 	var (
@@ -276,9 +276,9 @@ func (a *Agent) start(blockTime time.Duration, blocksPerRound, blocksPerPhase ui
 
 			a.logger.Info("entering phase", "phase", currentPhase.String(), "round", round, "block", block)
 
-			phaseEvents.Publish(currentPhase)
+			phaseEvents.Publish(currentPhase, block)
 			if currentPhase == claim {
-				phaseEvents.Publish(sample) // trigger sample along side the claim phase
+				phaseEvents.Publish(sample, block) // trigger sample along side the claim phase
 			}
 		}
 
@@ -328,7 +328,7 @@ func (a *Agent) claim(ctx context.Context) error {
 	return nil
 }
 
-func (a *Agent) play(ctx context.Context) (uint8, []byte, error) {
+func (a *Agent) play(ctx context.Context, block uint64) (uint8, []byte, error) {
 
 	// get depthmonitor fully synced indicator
 	ready := a.monitor.IsFullySynced()
@@ -353,12 +353,6 @@ func (a *Agent) play(ctx context.Context) (uint8, []byte, error) {
 	}
 
 	t := time.Now()
-	a.metrics.BackendCalls.Inc()
-	block, err := a.backend.BlockNumber(ctx)
-	if err != nil {
-		a.metrics.BackendErrors.Inc()
-		return 0, nil, err
-	}
 
 	timeLimiter, err := a.getPreviousRoundTime(ctx)
 	if err != nil {
