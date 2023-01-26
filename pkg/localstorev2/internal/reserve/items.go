@@ -10,15 +10,14 @@ import (
 const batchRadiusItemSize = 1 + swarm.HashSize + 8
 
 type batchRadiusItem struct {
-	batchID   []byte
-	PO        uint8
-	Address   swarm.Address
-	Timestamp []byte
-	BinID     uint64
+	batchID []byte
+	Bin     uint8
+	Address swarm.Address
+	BinID   uint64
 }
 
 func (b *batchRadiusItem) Namespace() string {
-	return fmt.Sprintf("batchRadius/%d/%s", b.PO, b.batchID)
+	return fmt.Sprintf("batchRadius/%d/%s", b.Bin, b.batchID)
 }
 
 func (b *batchRadiusItem) ID() string {
@@ -35,13 +34,11 @@ func (b *batchRadiusItem) Marshal() ([]byte, error) {
 
 	i := 0
 
-	buf[i] = b.PO
+	buf[i] = b.Bin
 	i += 1
 
 	copy(buf[i:], b.Address.Bytes())
 	i += swarm.HashSize
-
-	copy(buf[i:], b.Timestamp)
 
 	return buf, nil
 }
@@ -49,36 +46,38 @@ func (b *batchRadiusItem) Marshal() ([]byte, error) {
 func (b *batchRadiusItem) Unmarshal(buf []byte) error {
 
 	i := 0
-	b.PO = buf[i]
+	b.Bin = buf[i]
 	i += 1
 
 	b.Address = swarm.NewAddress(buf[i : i+swarm.HashSize])
 	i += swarm.HashSize
 
-	copy(buf[i:], b.Timestamp)
 	return nil
 }
 
-type chunkProximityItem struct {
-	po        uint8
-	binID     uint64
-	address   swarm.Address
-	timestamp []byte
+type chunkBinItem struct {
+	bin     uint8
+	binID   uint64
+	address swarm.Address
 }
 
-func (c *chunkProximityItem) Namespace() string {
-	return fmt.Sprintf("chunkProximity/%d", c.po)
+func binIDToString(binID uint64) string {
+	return fmt.Sprintf("%d", binID)
 }
 
-func (c *chunkProximityItem) ID() string {
-	return fmt.Sprintf("%d", c.binID)
+func (c *chunkBinItem) Namespace() string {
+	return fmt.Sprintf("chunkBin/%d", c.bin)
 }
 
-func (b *chunkProximityItem) Clone() storage.Item {
+func (c *chunkBinItem) ID() string {
+	return binIDToString(c.binID)
+}
+
+func (b *chunkBinItem) Clone() storage.Item {
 	return nil
 }
 
-func (b *chunkProximityItem) Marshal() ([]byte, error) {
+func (b *chunkBinItem) Marshal() ([]byte, error) {
 
 	// marshall address
 	// marshall timestamp
@@ -86,7 +85,7 @@ func (b *chunkProximityItem) Marshal() ([]byte, error) {
 	return nil, nil
 }
 
-func (b *chunkProximityItem) Unmarshal(buf []byte) error {
+func (b *chunkBinItem) Unmarshal(buf []byte) error {
 	return nil
 }
 
@@ -108,9 +107,6 @@ func (b *binItem) Clone() storage.Item {
 }
 
 func (b *binItem) Marshal() ([]byte, error) {
-
-	// marshall index
-
 	return nil, nil
 }
 
