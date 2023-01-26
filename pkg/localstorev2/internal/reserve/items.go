@@ -3,6 +3,7 @@ package reserve
 import (
 	"fmt"
 
+	storage "github.com/ethersphere/bee/pkg/storagev2"
 	"github.com/ethersphere/bee/pkg/swarm"
 )
 
@@ -22,6 +23,10 @@ func (b *batchRadiusItem) Namespace() string {
 
 func (b *batchRadiusItem) ID() string {
 	return b.Address.ByteString()
+}
+
+func (b *batchRadiusItem) Clone() storage.Item {
+	return nil
 }
 
 func (b *batchRadiusItem) Marshal() ([]byte, error) {
@@ -69,6 +74,10 @@ func (c *chunkProximityItem) ID() string {
 	return fmt.Sprintf("%d", c.binID)
 }
 
+func (b *chunkProximityItem) Clone() storage.Item {
+	return nil
+}
+
 func (b *chunkProximityItem) Marshal() ([]byte, error) {
 
 	// marshall address
@@ -92,6 +101,10 @@ func (b *binItem) Namespace() string {
 
 func (c *binItem) ID() string {
 	return fmt.Sprintf("%d", c.po)
+}
+
+func (b *binItem) Clone() storage.Item {
+	return nil
 }
 
 func (b *binItem) Marshal() ([]byte, error) {
