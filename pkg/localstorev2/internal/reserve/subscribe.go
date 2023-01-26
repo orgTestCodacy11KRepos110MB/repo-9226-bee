@@ -13,14 +13,14 @@ func newBinSubscriber() *binSubscriber {
 	}
 }
 
-func (b *binSubscriber) Subscribe(bin uint8) (func(), <-chan struct{}) {
+func (b *binSubscriber) Subscribe(bin uint8) (<-chan struct{}, func()) {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 
 	c := make(chan struct{}, 1)
 	b.subs[bin] = append(b.subs[bin], c)
 
-	return func() {
+	return c, func() {
 		b.mtx.Lock()
 		defer b.mtx.Unlock()
 
@@ -30,8 +30,7 @@ func (b *binSubscriber) Subscribe(bin uint8) (func(), <-chan struct{}) {
 				break
 			}
 		}
-	}, c
-
+	}
 }
 
 func (b *binSubscriber) Trigger(bin uint8) {

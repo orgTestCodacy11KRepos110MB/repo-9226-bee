@@ -189,7 +189,7 @@ func (r *reserve) SubscribeBin(ctx context.Context, bin uint8, start, end uint64
 		}
 	}
 
-	unsub, trigger := r.subscriber.Subscribe(bin)
+	trigger, unsub := r.subscriber.Subscribe(bin)
 	defer unsub()
 
 	go func() {
