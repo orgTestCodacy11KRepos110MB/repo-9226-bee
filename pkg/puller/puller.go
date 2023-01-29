@@ -34,6 +34,11 @@ const (
 	recalcPeersDur           = time.Minute * 5
 )
 
+type SyncReporter interface {
+	// Rate of syncing in terms of chunks/sec.
+	Rate() float64
+}
+
 type Options struct {
 	Bins         uint8
 	SyncSleepDur time.Duration

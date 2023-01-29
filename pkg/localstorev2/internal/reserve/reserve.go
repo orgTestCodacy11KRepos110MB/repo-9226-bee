@@ -4,12 +4,18 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
+	"github.com/ethersphere/bee/pkg/postage"
+	"github.com/ethersphere/bee/pkg/puller"
 	storage "github.com/ethersphere/bee/pkg/storagev2"
 	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/ethersphere/bee/pkg/topology"
 )
 
 type reserve struct {
+	mtx sync.Mutex
+
 	store      storage.Store
 	baseAddr   swarm.Address
 	chunkStore storage.ChunkStore
@@ -17,7 +23,11 @@ type reserve struct {
 	capacity   int
 	subscriber *binSubscriber
 
-	mtx sync.Mutex
+	// TODO
+	bs           postage.Storer
+	radius       uint8
+	radiusSetter topology.SetStorageRadiuser
+	syncer       puller.SyncReporter
 }
 
 /*
@@ -35,7 +45,7 @@ type reserve struct {
 
 func New(store storage.Store, baseAddr swarm.Address, chunkStore storage.ChunkStore, capacity int) (*reserve, error) {
 
-	size, err := store.Count(&batchRadiusItem{})
+	size, err := store.Count(&batchRadiusRoot{})
 	if err != nil {
 		return nil, err
 	}
@@ -49,9 +59,32 @@ func New(store storage.Store, baseAddr swarm.Address, chunkStore storage.ChunkSt
 		subscriber: newBinSubscriber(),
 	}
 
-	rs.limitSize()
+	go rs.radiusManager()
 
 	return rs, nil
+}
+
+func (r *reserve) radiusManager() {
+
+	for {
+		select {
+		case <-time.After(time.Minute * 5):
+		default:
+		}
+
+		r.mtx.Lock()
+
+		if r.size > (r.capacity * 4 / 10) {
+			continue
+		}
+
+		if r.syncer.Rate() == 0 {
+			r.radius--
+			r.radiusSetter.SetStorageRadius(r.radius)
+		}
+
+		r.mtx.Unlock()
+	}
 }
 
 // TODO: put should check that the po is within radius
@@ -105,7 +138,7 @@ func (r *reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 	r.subscriber.Trigger(bin)
 
 	r.size++
-	r.limitSize()
+	r.limitSize(ctx)
 
 	return nil
 }
@@ -165,6 +198,7 @@ func (r *reserve) unreserveBatchBin(ctx context.Context, batchID []byte, po uint
 	return nil
 }
 
+// TODO
 func (r *reserve) Sample() error {
 	return nil
 }
@@ -185,7 +219,7 @@ func (r *reserve) SubscribeBin(ctx context.Context, bin uint8, start, end uint64
 	sendError := func(err error) {
 		select {
 		case out <- BinResult{Error: err}:
-		default:
+		case <-ctx.Done():
 		}
 	}
 
@@ -214,13 +248,14 @@ func (r *reserve) SubscribeBin(ctx context.Context, bin uint8, start, end uint64
 				lastBinID = item.binID
 
 				if lastBinID == end {
-					return false, nil
+					return true, nil
 				}
 
 				return false, nil
 			})
 			if err != nil {
 				sendError(ctx.Err())
+				return
 			}
 
 			if lastBinID == end {
@@ -263,8 +298,23 @@ func (r *reserve) incBinID(po uint8) (uint64, error) {
 	return bin.binID, r.store.Put(bin)
 }
 
-func (r *reserve) limitSize() {
-	if r.size > r.capacity {
-		// TODO: iterate on batchstore for batches to unreserve
+func (r *reserve) limitSize(ctx context.Context) error {
+
+	if r.size < r.capacity {
+		return nil
 	}
+
+	err := r.bs.Iterate(func(b *postage.Batch) (bool, error) {
+		err := r.unreserveBatchBin(ctx, b.ID, r.radius)
+		if err != nil {
+			return false, err
+		}
+
+		if r.size < r.capacity {
+			return true, nil
+		}
+
+		return false, nil
+	})
+	return err
 }

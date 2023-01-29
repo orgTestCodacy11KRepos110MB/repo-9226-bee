@@ -9,6 +9,11 @@ import (
 
 const batchRadiusItemSize = 1 + swarm.HashSize + 8
 
+type batchRadiusRoot struct{}
+
+func (b *batchRadiusRoot) Namespace() string { return "batchRadius" }
+func (b *batchRadiusRoot) ID() string        { return "" }
+
 type batchRadiusItem struct {
 	batchID []byte
 	Bin     uint8
