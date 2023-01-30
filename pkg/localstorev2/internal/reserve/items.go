@@ -70,7 +70,7 @@ func binIDToString(bin uint8, binID uint64) string {
 }
 
 func binToString(bin uint8) string {
-	return fmt.Sprintf("%d")
+	return fmt.Sprintf("%d", bin)
 }
 
 func (c *chunkBinItem) Namespace() string {
@@ -103,7 +103,7 @@ type binItem struct {
 }
 
 func (b *binItem) Namespace() string {
-	return "binIndex"
+	return "binID"
 }
 
 func (c *binItem) ID() string {
