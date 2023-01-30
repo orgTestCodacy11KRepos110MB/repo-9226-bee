@@ -16,6 +16,7 @@ import (
 
 	"github.com/ethersphere/bee/pkg/localstorev2/internal"
 	"github.com/ethersphere/bee/pkg/localstorev2/internal/stampindex"
+	"github.com/ethersphere/bee/pkg/postage"
 	storage "github.com/ethersphere/bee/pkg/storagev2"
 	"github.com/ethersphere/bee/pkg/swarm"
 )
@@ -305,24 +306,27 @@ var (
 )
 
 type uploadPutter struct {
+	storage internal.Storage
+	stamper postage.Stamper
+
 	tagID  uint64
 	mtx    sync.Mutex
 	split  uint64
 	seen   uint64
-	s      internal.Storage
 	closed bool
 }
 
 // NewPutter returns a new chunk putter associated with the tagID.
-func NewPutter(s internal.Storage, tagId uint64) (internal.PutterCloserWithReference, error) {
+func NewPutter(storage internal.Storage, stamper postage.Stamper, tagId uint64) (internal.PutterCloserWithReference, error) {
 	ti := &tagItem{TagID: tagId, StartedAt: now().Unix()}
-	err := s.Store().Put(ti)
+	err := storage.Store().Put(ti)
 	if err != nil {
 		return nil, fmt.Errorf("failed creating tag: %w", err)
 	}
 	return &uploadPutter{
-		s:     s,
-		tagID: tagId,
+		storage: storage,
+		stamper: stamper,
+		tagID:   tagId,
 	}, nil
 }
 
@@ -340,7 +344,8 @@ func (u *uploadPutter) Put(ctx context.Context, chunk swarm.Chunk) error {
 		return errPutterAlreadyClosed
 	}
 
-	switch item, loaded, err := stampindex.LoadOrStore(u.s, stampIndexUploadNamespace, chunk); {
+	item, loaded, err := stampindex.LoadOrStore(u.storage, stampIndexUploadNamespace, chunk)
+	switch {
 	case err != nil:
 		return fmt.Errorf("load or store stamp index for chunk %v has fail: %w", chunk, err)
 	case loaded && item.ChunkIsImmutable:
@@ -353,6 +358,12 @@ func (u *uploadPutter) Put(ctx context.Context, chunk swarm.Chunk) error {
 		}
 	}
 
+	stamp, err := u.stamper.Stamp(item.ChunkAddress)
+	if err != nil {
+		return fmt.Errorf("stamper stamp call for chunk %s failed: %w", chunk.Address(), err)
+	}
+	chunk = chunk.WithStamp(stamp)
+
 	u.split++
 
 	// Check if upload store has already seen this chunk
@@ -360,7 +371,7 @@ func (u *uploadPutter) Put(ctx context.Context, chunk swarm.Chunk) error {
 		Address: chunk.Address(),
 		BatchID: chunk.Stamp().BatchID(),
 	}
-	switch exists, err := u.s.Store().Has(ui); {
+	switch exists, err := u.storage.Store().Has(ui); {
 	case err != nil:
 		return fmt.Errorf("store has item %q call failed: %w", ui, err)
 	case exists:
@@ -368,14 +379,14 @@ func (u *uploadPutter) Put(ctx context.Context, chunk swarm.Chunk) error {
 		return nil
 	}
 
-	if err := u.s.ChunkStore().Put(ctx, chunk); err != nil {
+	if err := u.storage.ChunkStore().Put(ctx, chunk); err != nil {
 		return fmt.Errorf("chunk store put chunk %q call failed: %w", chunk.Address(), err)
 	}
 
 	ui.Uploaded = now().Unix()
 	ui.TagID = u.tagID
 
-	if err := u.s.Store().Put(ui); err != nil {
+	if err := u.storage.Store().Put(ui); err != nil {
 		return fmt.Errorf("store put item %q call failed: %w", ui, err)
 	}
 
@@ -385,7 +396,7 @@ func (u *uploadPutter) Put(ctx context.Context, chunk swarm.Chunk) error {
 		BatchID:   chunk.Stamp().BatchID(),
 		TagID:     u.tagID,
 	}
-	if err := u.s.Store().Put(pi); err != nil {
+	if err := u.storage.Store().Put(pi); err != nil {
 		return fmt.Errorf("store put item %q call failed: %w", pi, err)
 	}
 
@@ -401,7 +412,7 @@ func (u *uploadPutter) Close(addr swarm.Address) error {
 	defer u.mtx.Unlock()
 
 	ti := &tagItem{TagID: u.tagID}
-	err := u.s.Store().Get(ti)
+	err := u.storage.Store().Get(ti)
 	if err != nil {
 		return fmt.Errorf("failed reading tag while closing: %w", err)
 	}
@@ -413,7 +424,7 @@ func (u *uploadPutter) Close(addr swarm.Address) error {
 		ti.Address = addr.Clone()
 	}
 
-	err = u.s.Store().Put(ti)
+	err = u.storage.Store().Put(ti)
 	if err != nil {
 		return fmt.Errorf("failed storing tag: %w", err)
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/ethersphere/bee/pkg/localstorev2/internal"
 	"github.com/ethersphere/bee/pkg/localstorev2/internal/upload"
 	"github.com/ethersphere/bee/pkg/postage"
+	postagemock "github.com/ethersphere/bee/pkg/postage/mock"
 	postagetesting "github.com/ethersphere/bee/pkg/postage/testing"
 	chunktest "github.com/ethersphere/bee/pkg/storage/testing"
 	storage "github.com/ethersphere/bee/pkg/storagev2"
@@ -347,7 +348,7 @@ func TestChunkPutter(t *testing.T) {
 	ts := newTestStorage(t)
 
 	const tagID = 1
-	putter, err := upload.NewPutter(ts, tagID)
+	putter, err := upload.NewPutter(ts, postagemock.NewStamper(), tagID)
 	if err != nil {
 		t.Fatalf("failed creating putter: %v", err)
 	}
@@ -506,7 +507,7 @@ func TestChunkReporter(t *testing.T) {
 	ts := newTestStorage(t)
 
 	const tagID = 1
-	putter, err := upload.NewPutter(ts, tagID)
+	putter, err := upload.NewPutter(ts, postagemock.NewStamper(), tagID)
 	if err != nil {
 		t.Fatalf("failed creating putter: %v", err)
 	}
