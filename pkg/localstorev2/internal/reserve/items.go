@@ -10,9 +10,10 @@ import (
 const batchRadiusItemSize = 1 + swarm.HashSize + 8
 
 type batchRadiusItem struct {
-	batchID []byte
-	Bin     uint8
+	BatchID []byte
+
 	Address swarm.Address
+	Bin     uint8
 	BinID   uint64
 }
 
@@ -20,8 +21,9 @@ func (b *batchRadiusItem) Namespace() string {
 	return "batchRadius"
 }
 
+// bin/batchID/ChunkAddr
 func (b *batchRadiusItem) ID() string {
-	return batchBinToString(b.Bin, b.batchID)
+	return fmt.Sprintf("%s/%s", batchBinToString(b.Bin, b.BatchID), b.Address)
 }
 
 func batchBinToString(bin uint8, batchID []byte) string {
@@ -60,13 +62,14 @@ func (b *batchRadiusItem) Unmarshal(buf []byte) error {
 }
 
 type chunkBinItem struct {
-	bin     uint8
-	binID   uint64
-	address swarm.Address
+	Bin uint8
+
+	BinID   uint64
+	Address swarm.Address
 }
 
 func binIDToString(bin uint8, binID uint64) string {
-	return fmt.Sprintf("%d/%d", bin, binID)
+	return fmt.Sprintf("%s/%d", binToString(bin), binID)
 }
 
 func binToString(bin uint8) string {
@@ -77,8 +80,9 @@ func (c *chunkBinItem) Namespace() string {
 	return "chunkBin"
 }
 
+// bin/binID
 func (c *chunkBinItem) ID() string {
-	return binIDToString(c.bin, c.binID)
+	return binIDToString(c.Bin, c.BinID)
 }
 
 func (b *chunkBinItem) Clone() storage.Item {
@@ -98,8 +102,8 @@ func (b *chunkBinItem) Unmarshal(buf []byte) error {
 }
 
 type binItem struct {
-	po    uint8
-	binID uint64
+	PO    uint8
+	BinID uint64
 }
 
 func (b *binItem) Namespace() string {
@@ -107,7 +111,7 @@ func (b *binItem) Namespace() string {
 }
 
 func (c *binItem) ID() string {
-	return fmt.Sprintf("%d", c.po)
+	return fmt.Sprintf("%d", c.PO)
 }
 
 func (b *binItem) Clone() storage.Item {

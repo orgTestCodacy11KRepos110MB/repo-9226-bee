@@ -1,7 +1,6 @@
 package reserve
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"sync"
@@ -39,9 +38,9 @@ type Sample struct {
 }
 
 /*
-	pull by 	po - binID
-	evict by 	po - batchID
-	sample by 	po
+	pull by 	bin - binID
+	evict by 	bin - batchID
+	sample by 	bin
 
 
 	GOALS:
@@ -82,7 +81,7 @@ func (r *reserve) radiusManager() {
 
 		r.mtx.Lock()
 
-		if r.size > (r.capacity * 4 / 10) {
+		if r.size >= (r.capacity * 4 / 10) {
 			continue
 		}
 
@@ -104,7 +103,7 @@ func (r *reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 	has, err := r.store.Has(&batchRadiusItem{
 		Bin:     r.po(chunk.Address()),
 		Address: chunk.Address(),
-		batchID: chunk.Stamp().BatchID(),
+		BatchID: chunk.Stamp().BatchID(),
 	})
 	if err != nil {
 		return nil
@@ -122,7 +121,7 @@ func (r *reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 	err = r.store.Put(&batchRadiusItem{
 		Bin:     bin,
 		Address: chunk.Address(),
-		batchID: chunk.Stamp().BatchID(),
+		BatchID: chunk.Stamp().BatchID(),
 		BinID:   binID,
 	})
 	if err != nil {
@@ -130,9 +129,9 @@ func (r *reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 	}
 
 	err = r.store.Put(&chunkBinItem{
-		bin:     bin,
-		binID:   binID,
-		address: chunk.Address(),
+		Bin:     bin,
+		BinID:   binID,
+		Address: chunk.Address(),
 	})
 	if err != nil {
 		return nil
@@ -158,19 +157,17 @@ func (r *reserve) EvictBatch(ctx context.Context, batchID []byte) error {
 }
 
 // Must be called under lock.
-func (r *reserve) unreserveBatchBin(ctx context.Context, batchID []byte, po uint8) error {
+func (r *reserve) unreserveBatchBin(ctx context.Context, batchID []byte, bin uint8) error {
 
-	for i := uint8(0); i < po; i++ {
+	for i := uint8(0); i < bin; i++ {
 		err := r.store.Iterate(storage.Query{
 			Factory: func() storage.Item {
 				return &batchRadiusItem{}
 			},
-			Prefix: batchBinToString(po, batchID),
+			Prefix: batchBinToString(bin, batchID),
 		}, func(res storage.Result) (bool, error) {
 
 			batchRadius := res.Entry.(*batchRadiusItem)
-			batchRadius.batchID = batchID
-			batchRadius.Bin = po
 
 			err := r.store.Delete(batchRadius)
 			if err != nil {
@@ -180,8 +177,8 @@ func (r *reserve) unreserveBatchBin(ctx context.Context, batchID []byte, po uint
 			r.size--
 
 			err = r.store.Delete(&chunkBinItem{
-				bin:   batchRadius.Bin,
-				binID: batchRadius.BinID,
+				Bin:   batchRadius.Bin,
+				BinID: batchRadius.BinID,
 			})
 			if err != nil {
 				return false, err
@@ -201,11 +198,6 @@ func (r *reserve) unreserveBatchBin(ctx context.Context, batchID []byte, po uint
 	}
 
 	return nil
-}
-
-// less function uses the byte compare to check for lexicographic ordering
-func le(a, b []byte) bool {
-	return bytes.Compare(a, b) == -1
 }
 
 type BinResult struct {
@@ -237,18 +229,18 @@ func (r *reserve) SubscribeBin(ctx context.Context, bin uint8, start, end uint64
 				Factory: func() storage.Item {
 					return &chunkBinItem{}
 				},
-				Prefix: binIDToString(bin, start),
+				StartPrefix: binIDToString(bin, start),
 			}, func(res storage.Result) (bool, error) {
 
 				item := res.Entry.(*chunkBinItem)
 
 				select {
-				case out <- BinResult{Address: item.address, BinID: item.binID}:
+				case out <- BinResult{Address: item.Address, BinID: item.BinID}:
 				case <-ctx.Done():
 					return false, ctx.Err()
 				}
 
-				lastBinID = item.binID
+				lastBinID = item.BinID
 
 				if lastBinID == end {
 					return true, nil
@@ -286,7 +278,7 @@ func (r *reserve) po(addr swarm.Address) uint8 {
 // Must be called under lock.
 func (r *reserve) incBinID(po uint8) (uint64, error) {
 
-	bin := &binItem{po: po}
+	bin := &binItem{PO: po}
 	err := r.store.Get(bin)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -296,9 +288,9 @@ func (r *reserve) incBinID(po uint8) (uint64, error) {
 		return 0, err
 	}
 
-	bin.binID += 1
+	bin.BinID += 1
 
-	return bin.binID, r.store.Put(bin)
+	return bin.BinID, r.store.Put(bin)
 }
 
 func (r *reserve) incSize(ctx context.Context) error {

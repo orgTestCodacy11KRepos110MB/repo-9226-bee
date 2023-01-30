@@ -1,6 +1,7 @@
 package reserve
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"encoding/binary"
@@ -72,13 +73,13 @@ func (r *reserve) Sample(ctx context.Context,
 			Factory: func() storage.Item {
 				return &chunkBinItem{}
 			},
-			Prefix: binToString(storageRadius),
+			StartPrefix: binToString(storageRadius),
 		}, func(res storage.Result) (bool, error) {
 
 			item := res.Entry.(*chunkBinItem)
 
 			select {
-			case addrChan <- item.address:
+			case addrChan <- item.Address:
 				stat.TotalIterated.Inc()
 				return false, nil
 			case <-ctx.Done():
@@ -201,4 +202,9 @@ func (r *reserve) Sample(ctx context.Context,
 	logger.Info("sampler done", "duration", time.Since(t), "storage_radius", storageRadius, "consensus_time_ns", consensusTime, "stats", stat, "sample", sample)
 
 	return sample, nil
+}
+
+// less function uses the byte compare to check for lexicographic ordering
+func le(a, b []byte) bool {
+	return bytes.Compare(a, b) == -1
 }
