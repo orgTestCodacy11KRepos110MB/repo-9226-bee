@@ -73,7 +73,8 @@ func (r *reserve) Sample(ctx context.Context,
 			Factory: func() storage.Item {
 				return &chunkBinItem{}
 			},
-			StartPrefix: binToString(storageRadius),
+			Prefix:        binToString(storageRadius),
+			PrefixAtStart: true,
 		}, func(res storage.Result) (bool, error) {
 
 			item := res.Entry.(*chunkBinItem)

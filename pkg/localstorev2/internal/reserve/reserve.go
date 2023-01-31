@@ -248,7 +248,8 @@ func (r *reserve) SubscribeBin(ctx context.Context, bin uint8, start, end uint64
 				Factory: func() storagev2.Item {
 					return &chunkBinItem{}
 				},
-				StartPrefix: binIDToString(bin, start),
+				Prefix:        binIDToString(bin, start),
+				PrefixAtStart: true,
 			}, func(res storagev2.Result) (bool, error) {
 
 				item := res.Entry.(*chunkBinItem)
