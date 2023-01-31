@@ -163,7 +163,7 @@ func (r *reserve) Put(ctx context.Context, chunk swarm.Chunk) error {
 
 	r.subscriber.Trigger(bin)
 
-	r.incSize(ctx)
+	r.incSize()
 
 	return nil
 }
@@ -176,6 +176,7 @@ func (r *reserve) EvictBatch(ctx context.Context, batchID []byte) error {
 }
 
 // Must be called under lock.
+// TODO: consider how to respect the context
 func (r *reserve) unreserveBatchBin(ctx context.Context, batchID []byte, bin uint8) error {
 
 	for i := uint8(0); i < bin; i++ {
@@ -318,7 +319,7 @@ func (r *reserve) incBinID(po uint8) (uint64, error) {
 }
 
 // Must be called under lock.
-func (r *reserve) incSize(ctx context.Context) error {
+func (r *reserve) incSize() error {
 
 	r.size++
 
@@ -334,16 +335,16 @@ func (r *reserve) incSize(ctx context.Context) error {
 
 		for r.size > r.capacity {
 
-			stopEarly := false
+			belowCap := false
 
 			err := r.bs.Iterate(func(b *postage.Batch) (bool, error) {
-				err := r.unreserveBatchBin(ctx, b.ID, r.radius)
+				err := r.unreserveBatchBin(context.TODO(), b.ID, r.radius)
 				if err != nil {
 					return false, err
 				}
 
 				if r.size <= r.capacity {
-					stopEarly = true
+					belowCap = true
 					return true, nil
 				}
 
@@ -352,7 +353,7 @@ func (r *reserve) incSize(ctx context.Context) error {
 			if err != nil {
 				return
 			}
-			if stopEarly {
+			if belowCap {
 				return
 			}
 			r.radius++
