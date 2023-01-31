@@ -9,27 +9,34 @@ import (
 	"github.com/ethersphere/bee/pkg/log"
 	"github.com/ethersphere/bee/pkg/postage"
 	"github.com/ethersphere/bee/pkg/puller"
-	storage "github.com/ethersphere/bee/pkg/storagev2"
+	"github.com/ethersphere/bee/pkg/storage"
+	storagev2 "github.com/ethersphere/bee/pkg/storagev2"
 	"github.com/ethersphere/bee/pkg/swarm"
 	"github.com/ethersphere/bee/pkg/topology"
 )
 
+const storageRadiusKey = "reserve_storage_radius"
+
 type reserve struct {
 	mtx sync.Mutex
 
-	store      storage.Store
+	store      storagev2.Store
 	baseAddr   swarm.Address
-	chunkStore storage.ChunkStore
+	chunkStore storagev2.ChunkStore
 	size       int
 	capacity   int
 	subscriber *binSubscriber
 
+	radius uint8
 	// TODO
 	bs           postage.Storer
-	radius       uint8
 	radiusSetter topology.SetStorageRadiuser
 	syncer       puller.SyncReporter
 	logger       log.Logger
+	stateStore   storage.StateStorer
+
+	quit chan struct{}
+	wg   sync.WaitGroup
 }
 
 type Sample struct {
@@ -50,9 +57,15 @@ type Sample struct {
 
 */
 
-func New(store storage.Store, baseAddr swarm.Address, chunkStore storage.ChunkStore, capacity int) (*reserve, error) {
+func New(store storagev2.Store, stateStore storage.StateStorer, baseAddr swarm.Address, chunkStore storagev2.ChunkStore, capacity int) (*reserve, error) {
 
 	size, err := store.Count(&batchRadiusItem{})
+	if err != nil {
+		return nil, err
+	}
+
+	var radius uint8
+	err = stateStore.Get(storageRadiusKey, &radius)
 	if err != nil {
 		return nil, err
 	}
@@ -64,14 +77,19 @@ func New(store storage.Store, baseAddr swarm.Address, chunkStore storage.ChunkSt
 		size:       size,
 		capacity:   capacity,
 		subscriber: newBinSubscriber(),
+		quit:       make(chan struct{}),
+		radius:     radius,
 	}
 
+	rs.wg.Add(1)
 	go rs.radiusManager()
 
 	return rs, nil
 }
 
 func (r *reserve) radiusManager() {
+
+	defer r.wg.Done()
 
 	for {
 		select {
@@ -88,6 +106,7 @@ func (r *reserve) radiusManager() {
 		if r.syncer.Rate() == 0 {
 			r.radius--
 			r.radiusSetter.SetStorageRadius(r.radius)
+			_ = r.stateStore.Put(storageRadiusKey, &r.radius)
 		}
 
 		r.mtx.Unlock()
@@ -160,12 +179,12 @@ func (r *reserve) EvictBatch(ctx context.Context, batchID []byte) error {
 func (r *reserve) unreserveBatchBin(ctx context.Context, batchID []byte, bin uint8) error {
 
 	for i := uint8(0); i < bin; i++ {
-		err := r.store.Iterate(storage.Query{
-			Factory: func() storage.Item {
+		err := r.store.Iterate(storagev2.Query{
+			Factory: func() storagev2.Item {
 				return &batchRadiusItem{}
 			},
 			Prefix: batchBinToString(bin, batchID),
-		}, func(res storage.Result) (bool, error) {
+		}, func(res storagev2.Result) (bool, error) {
 
 			batchRadius := res.Entry.(*batchRadiusItem)
 
@@ -208,10 +227,7 @@ type BinResult struct {
 
 func (r *reserve) SubscribeBin(ctx context.Context, bin uint8, start, end uint64) <-chan BinResult {
 
-	var (
-		out       = make(chan BinResult, 1)
-		lastBinID uint64
-	)
+	out := make(chan BinResult, 1)
 
 	sendError := func(err error) {
 		select {
@@ -220,17 +236,19 @@ func (r *reserve) SubscribeBin(ctx context.Context, bin uint8, start, end uint64
 		}
 	}
 
-	trigger, unsub := r.subscriber.Subscribe(bin)
-	defer unsub()
-
 	go func() {
+		trigger, unsub := r.subscriber.Subscribe(bin)
+		defer unsub()
+
+		var lastBinID uint64
+
 		for {
-			err := r.store.Iterate(storage.Query{
-				Factory: func() storage.Item {
+			err := r.store.Iterate(storagev2.Query{
+				Factory: func() storagev2.Item {
 					return &chunkBinItem{}
 				},
 				StartPrefix: binIDToString(bin, start),
-			}, func(res storage.Result) (bool, error) {
+			}, func(res storagev2.Result) (bool, error) {
 
 				item := res.Entry.(*chunkBinItem)
 
@@ -271,6 +289,12 @@ func (r *reserve) SubscribeBin(ctx context.Context, bin uint8, start, end uint64
 
 }
 
+func (r *reserve) Close() error {
+	close(r.quit)
+	r.wg.Wait()
+	return nil
+}
+
 func (r *reserve) po(addr swarm.Address) uint8 {
 	return swarm.Proximity(r.baseAddr.Bytes(), addr.Bytes())
 }
@@ -281,7 +305,7 @@ func (r *reserve) incBinID(po uint8) (uint64, error) {
 	bin := &binItem{PO: po}
 	err := r.store.Get(bin)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
+		if errors.Is(err, storagev2.ErrNotFound) {
 			return 0, r.store.Put(bin)
 		}
 
@@ -293,25 +317,50 @@ func (r *reserve) incBinID(po uint8) (uint64, error) {
 	return bin.BinID, r.store.Put(bin)
 }
 
+// Must be called under lock.
 func (r *reserve) incSize(ctx context.Context) error {
 
 	r.size++
 
-	if r.size < r.capacity {
+	if r.size <= r.capacity {
 		return nil
 	}
 
-	err := r.bs.Iterate(func(b *postage.Batch) (bool, error) {
-		err := r.unreserveBatchBin(ctx, b.ID, r.radius)
-		if err != nil {
-			return false, err
-		}
+	r.wg.Add(1)
+	go func() {
+		r.mtx.Lock()
+		defer r.mtx.Unlock()
+		defer r.wg.Done()
 
-		if r.size < r.capacity {
-			return true, nil
-		}
+		for r.size > r.capacity {
 
-		return false, nil
-	})
-	return err
+			stopEarly := false
+
+			err := r.bs.Iterate(func(b *postage.Batch) (bool, error) {
+				err := r.unreserveBatchBin(ctx, b.ID, r.radius)
+				if err != nil {
+					return false, err
+				}
+
+				if r.size <= r.capacity {
+					stopEarly = true
+					return true, nil
+				}
+
+				return false, nil
+			})
+			if err != nil {
+				return
+			}
+			if stopEarly {
+				return
+			}
+			r.radius++
+			r.radiusSetter.SetStorageRadius(r.radius)
+			_ = r.stateStore.Put(storageRadiusKey, &r.radius)
+		}
+	}()
+
+	return nil
+
 }
